@@ -57,7 +57,11 @@ cd panda
 PYTHONPATH=../opendbc_repo scons --minimal -j4
 ```
 
-This requires `arm-none-eabi-gcc`, SCons, and PyCryptodome. The default debug signing configuration matches Dom's existing release artifacts; do not change signing/build mode casually. Commit the regenerated tracked `panda/board/obj` artifacts together. `pandad` compares the selected firmware signature, flashes mismatches, and checks the result. Firmware build provenance and SHA-256 hashes accompany the local package.
+This requires `arm-none-eabi-gcc`, SCons, and PyCryptodome. The default debug signing configuration matches Dom's existing release artifacts; do not change signing/build mode casually. Commit the regenerated tracked `panda/board/obj` artifacts together. `pandad` compares the selected firmware signature, flashes mismatches, and checks the result.
+
+All 18 firmware variants were rebuilt locally with Arm GNU Toolchain 14.2.Rel1 from source commit `35a37d068b909110ced5ad3c1d16e7a29ddd3092`. Their embedded version is `DEV-35a37d06-DEBUG`. Lengths, version metadata, payloads, RSA signatures, and ARM ELF architecture were verified; every runtime signature differs from Dom's original firmware. [JUNIPER_FIRMWARE.json](JUNIPER_FIRMWARE.json) records build provenance and SHA-256 hashes for the 90 associated signed images, binaries, bootstubs, and ELF files. The firmware artifacts are committed separately from the source changes so that the embedded source revision remains traceable.
+
+The local `juniper-fix` branch contains the complete source and firmware. It has not been published to GitHub or installed on a comma device. A binary Git patch is saved alongside the repository as `StarPilot-Juniper.patch`; it contains both commits and applies to the exact Dom base listed above. Do not copy only the Python files onto a device: the DBC and matching Panda firmware are part of the same change.
 
 ## Before using the branch in the vehicle
 
