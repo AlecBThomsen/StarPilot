@@ -88,10 +88,10 @@ class TestTeslaSafetyBase(common.CarSafetyTest, common.AngleSteeringSafetyTest, 
     return self.packer.make_can_msg_safety("EPAS3S_sysStatus", 0, values)
 
   def _user_brake_msg(self, brake, quality_flag: bool = True):
-    values = {"IBST_driverBrakeApply": 2 if brake else 1}
+    values = {"ESP_driverBrakeApply": 2 if brake else 1}
     if not quality_flag:
-      values["IBST_driverBrakeApply"] = random.choice((0, 3))  # NOT_INIT_OR_OFF, FAULT
-    return self.packer.make_can_msg_safety("IBST_status", 0, values)
+      values["ESP_driverBrakeApply"] = random.choice((0, 3))  # NotInit_orOff, Faulty_SNA
+    return self.packer.make_can_msg_safety("ESP_status", 0, values)
 
   def _speed_msg(self, speed):
     values = {"DI_vehicleSpeed": speed * 3.6}
@@ -135,7 +135,7 @@ class TestTeslaSafetyBase(common.CarSafetyTest, common.AngleSteeringSafetyTest, 
 
   def test_rx_hook(self):
     # counter check
-    for msg_type in ("angle", "long", "speed", "speed_2"):
+    for msg_type in ("angle", "long", "speed", "speed_2", "brake"):
       # send multiple times to verify counter checks
       for i in range(10):
         if msg_type == "angle":
@@ -146,6 +146,8 @@ class TestTeslaSafetyBase(common.CarSafetyTest, common.AngleSteeringSafetyTest, 
           msg = self._speed_msg(0)
         elif msg_type == "speed_2":
           msg = self._speed_msg_2(0)
+        elif msg_type == "brake":
+          msg = self._user_brake_msg(False)
 
         should_rx = i >= 5
         if not should_rx:
@@ -158,6 +160,8 @@ class TestTeslaSafetyBase(common.CarSafetyTest, common.AngleSteeringSafetyTest, 
             msg[0].data[0] = 0
           elif msg_type == "speed_2":
             msg[0].data[7] = 0
+          elif msg_type == "brake":
+            msg[0].data[0] = 0
 
         self.safety.set_controls_allowed(True)
         self.assertEqual(should_rx, self._rx(msg))
@@ -200,9 +204,16 @@ class TestTeslaSafetyBase(common.CarSafetyTest, common.AngleSteeringSafetyTest, 
       self.assertEqual(quality_flag, self.safety.get_controls_allowed())
 
   def test_user_brake_quality_flag(self):
-    for quality_flag in (True, False):
-      msg = self._user_brake_msg(True, quality_flag=quality_flag)
-      self.assertEqual(quality_flag, self._rx(msg))
+    for brake_status in range(4):
+      with self.subTest(brake_status=brake_status):
+        self.assertTrue(self._rx(self._user_brake_msg(False)))
+        self.safety.set_controls_allowed(True)
+        msg = self.packer.make_can_msg_safety("ESP_status", 0, {"ESP_driverBrakeApply": brake_status})
+        self.assertEqual(brake_status in (1, 2), self._rx(msg))
+        # Invalid quality and a new brake press both prevent continued control.
+        self.assertEqual(brake_status == 1, self.safety.get_controls_allowed())
+        if brake_status in (1, 2):
+          self.assertEqual(brake_status == 2, self.safety.get_brake_pressed_prev())
 
   def test_steering_wheel_disengage(self):
     # Tesla disengages when the user forcibly overrides the locked-in angle steering control
@@ -263,12 +274,14 @@ class TestTeslaSafetyBase(common.CarSafetyTest, common.AngleSteeringSafetyTest, 
       self.assertEqual(self.LONGITUDINAL, self._tx(self._long_control_msg(0, acc_state=self.acc_states["ACC_ON"])))
 
   def test_steering_control_type(self):
-    # Only angle control is allowed (no LANE_KEEP_ASSIST or EMERGENCY_LANE_KEEP)
-    self.safety.set_controls_allowed(True)
-    for steer_control_type in range(4):
-      should_tx = steer_control_type in (self.steer_control_types["NONE"],
-                                         self.steer_control_types["ANGLE_CONTROL"])
-      self.assertEqual(should_tx, self._tx(self._angle_cmd_msg(0, state=steer_control_type)))
+    # Only NONE and authorized ANGLE_CONTROL are allowed, never LKAS, ELK, or FSD.
+    for controls_allowed in (False, True):
+      for steer_control_type in range(8):
+        with self.subTest(controls_allowed=controls_allowed, steer_control_type=steer_control_type):
+          self.safety.set_controls_allowed(controls_allowed)
+          should_tx = steer_control_type == self.steer_control_types["NONE"] or (
+            controls_allowed and steer_control_type == self.steer_control_types["ANGLE_CONTROL"])
+          self.assertEqual(should_tx, self._tx(self._angle_cmd_msg(0, state=steer_control_type)))
 
   def test_stock_lkas_passthrough(self):
     # TODO: make these generic passthrough tests
@@ -285,6 +298,13 @@ class TestTeslaSafetyBase(common.CarSafetyTest, common.AngleSteeringSafetyTest, 
     self.assertEqual(1, self._rx(lkas_msg_cam))
     self.assertEqual(0, self.safety.safety_fwd_hook(2, lkas_msg_cam.addr))
     self.assertFalse(self._tx(no_lkas_msg))
+
+  def test_stock_fsd_is_not_mistaken_for_lkas(self):
+    # FSD=4 occupied the same bits as LKAS=2 in the old 2-bit decoder.
+    self.safety.set_controls_allowed(False)
+    self.assertTrue(self._rx(self._angle_cmd_msg(0, state=self.steer_control_types["FSD"], bus=2)))
+    self.assertEqual(-1, self.safety.safety_fwd_hook(2, MSG_DAS_steeringControl))
+    self.assertTrue(self._tx(self._angle_cmd_msg(0, state=False)))
 
   def test_angle_cmd_when_enabled(self):
     # We properly test lateral acceleration and jerk below

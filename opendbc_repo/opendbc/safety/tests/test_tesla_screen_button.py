@@ -67,18 +67,20 @@ class TestTeslaScreenButton(unittest.TestCase):
             self.assertFalse(self.helper._tx(self.helper._angle_cmd_msg(0)))
 
   def test_cruise_engagement_arms_lateral_and_brake_respects_option(self):
-    for disengage_on_brake in (False, True):
-      with self.subTest(disengage_on_brake=disengage_on_brake):
-        self.init_safety(disengage_on_brake=disengage_on_brake)
-        self.helper._rx(self.helper._pcm_status_msg(True))
-        self.assertTrue(self.safety.get_lkas_on())
-        self.assertTrue(self.safety.get_aol_allowed())
-        self.helper._rx(self.helper._user_brake_msg(True))
-        self.helper._rx(self.helper._pcm_status_msg(False))
-        self.helper._rx(self.helper._user_brake_msg(False))
-        self.assertEqual(self.safety.get_lkas_on(), not disengage_on_brake)
-        self.assertEqual(self.safety.get_aol_allowed(), not disengage_on_brake)
-        self.assertFalse(self.safety.get_controls_allowed())
+    for cooperative in (False, True):
+      for long_control in (False, True):
+        for disengage_on_brake in (False, True):
+          with self.subTest(cooperative=cooperative, long_control=long_control, disengage_on_brake=disengage_on_brake):
+            self.init_safety(cooperative=cooperative, long_control=long_control, disengage_on_brake=disengage_on_brake)
+            self.helper._rx(self.helper._pcm_status_msg(True))
+            self.assertTrue(self.safety.get_lkas_on())
+            self.assertTrue(self.safety.get_aol_allowed())
+            self.helper._rx(self.helper._user_brake_msg(True))
+            self.helper._rx(self.helper._pcm_status_msg(False))
+            self.helper._rx(self.helper._user_brake_msg(False))
+            self.assertEqual(self.safety.get_lkas_on(), not disengage_on_brake)
+            self.assertEqual(self.safety.get_aol_allowed(), not disengage_on_brake)
+            self.assertFalse(self.safety.get_controls_allowed())
 
   def test_cruise_engagement_does_not_override_screen_disengagement_inputs(self):
     for blocked_by in ("brake", "steering", "cancel"):

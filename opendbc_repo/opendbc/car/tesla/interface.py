@@ -12,6 +12,15 @@ class CarInterface(CarInterfaceBase):
   CarController = CarController
   RadarInterface = RadarInterface
 
+  def __init__(self, CP, FPCP):
+    super().__init__(CP, FPCP)
+    if CP.dashcamOnly:
+      # Dom's card uses controller availability to select passive/noOutput mode.
+      # Enforce the protocol guard there as well as in the reported car params.
+      self.CC = None
+      CP.passive = True
+      CP.safetyConfigs = [get_safety_config(structs.CarParams.SafetyModel.noOutput)]
+
   @staticmethod
   def get_pid_accel_limits(CP, current_speed, cruise_speed):
     if CP.carFingerprint == CAR.TESLA_MODEL_S_PREAP:
@@ -74,6 +83,11 @@ class CarInterface(CarInterfaceBase):
       ret.vEgoStarting = 0.1
       ret.stoppingDecelRate = 0.3
 
-    ret.dashcamOnly = candidate in (CAR.TESLA_MODEL_X) # dashcam only, pending find invalidLkasSetting signal
+    # Newer Tesla firmware uses a 3-bit DAS_steeringControlType. These messages
+    # identify that protocol independently of cached EPS firmware versions.
+    # 0x054 also covers HW2.5, whose Autopilot computer does not send 0x489.
+    das_steering_3_bit = 0x489 in fingerprint[CANBUS.autopilot_party] or 0x054 in fingerprint[CANBUS.party]
+    ret.dashcamOnly = (candidate == CAR.TESLA_MODEL_X or  # pending invalidLkasSetting signal
+                       (not das_steering_3_bit and not docs))
 
     return ret

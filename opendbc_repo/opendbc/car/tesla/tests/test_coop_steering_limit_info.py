@@ -5,8 +5,6 @@ from types import SimpleNamespace
 
 import pytest
 
-import cereal.messaging as messaging
-
 from cereal import car
 from opendbc.car import gen_empty_fingerprint
 from opendbc.car.tesla.carcontroller import CarController
@@ -81,6 +79,8 @@ def test_steering_limit_info_defaults_to_invalid():
 
 
 def test_steering_limit_info_round_trips_through_custom_message():
+  import cereal.messaging as messaging
+
   message = messaging.new_message("starpilotCarControl", valid=True)
   info = message.starpilotCarControl.steeringLimitInfo
   info.valid = True
@@ -201,7 +201,7 @@ def test_diagnostics_invalid_when_not_in_supported_active_path(candidate, cooper
   assert info.monoTime == 0
 
 
-def test_actual_actuators_and_steering_can_match_pinned_baseline_fixture():
+def test_actual_actuators_and_steering_can_match_baseline_with_current_protocol():
   fixture = json.loads(BASELINE_FIXTURE.read_text())
   assert fixture["metadata"] == {
     "schemaVersion": 1,
@@ -225,4 +225,15 @@ def test_actual_actuators_and_steering_can_match_pinned_baseline_fixture():
     )
 
     assert legacy_actuator_dict(candidate_actuators) == expected["actuators"]
-    assert [[address, data.hex(), bus] for address, data, bus in candidate_can] == expected["can"]
+    expected_can = []
+    for address, data_hex, bus in expected["can"]:
+      data = bytearray.fromhex(data_hex)
+      if address == 0x488:
+        # The historical fixture uses two-bit steering. Only the control-type
+        # bit and its checksum change; angles, counters and other commands match.
+        old_type_bits = data[2] & 0xE0
+        assert old_type_bits in (0, 0x40)
+        data[2] = (data[2] & 0x1F) | (old_type_bits >> 1)
+        data[3] = (data[3] - (old_type_bits >> 1)) & 0xFF
+      expected_can.append([address, data.hex(), bus])
+    assert [[address, data.hex(), bus] for address, data, bus in candidate_can] == expected_can
